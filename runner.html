@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <title>TP RXJS</title>
+  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/rxjs/6.5.5/rxjs.umd.js">
+  </script>
+  <style>
+    #screen {
+      position: relative;
+      border: 1px solid black;
+      width: 300px;
+      height: 250px;
+      background: url('alien-planet-game.jpg');
+      background-size: cover;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Cours ! Forrest ... Cours ! </h1>
+  <canvas id="screen" width="400" height="400" />
+  <script>
+    let screen = document.getElementById('screen');
+    let ctx = screen.getContext('2d');
+    const sprite_width = 84
+
+    let distance = 0;
+
+    const distance_subject = new rxjs.BehaviorSubject(0);
+    const arret_subject = new rxjs.Subject();
+
+    distance_subject.asObservable().subscribe((v) => distance = v)
+
+    let coureur = {
+      x: 0,
+      y: 250,
+      pos: 0,
+      img: new Image(),
+      draw: function (mode) {
+        ctx.clearRect(0, 0, 400, 400);
+        switch (mode) {
+          case 1: {
+            ctx.drawImage(this.img, this.pos, 0, sprite_width, 100, this.x, this.y, sprite_width, 100);
+            this.pos += sprite_width;
+            this.pos %= sprite_width * 6;
+            this.x = distance;
+            break;
+          }
+          case 2: {
+            ctx.drawImage(this.img, this.pos, 160, sprite_width, 100, this.x, this.y, sprite_width, 100);
+            this.pos += sprite_width;
+            this.pos %= sprite_width * 2;
+            this.x = distance;
+            break;
+          }
+        }
+      }
+    };
+
+    coureur.img.src = "http://jeanferdysusini.free.fr/images/png/runner.png";
+
+    const code_touches = ["ArrowLeft", "ArrowRight"];
+
+    const musique = new Audio('http://jeanferdysusini.free.fr/FF_vic.mp3');
+    musique.load();
+
+    const keyDowns$ = rxjs.fromEvent(document, 'keydown').pipe(
+      rxjs.operators.tap(coureur.draw(2)),
+      rxjs.operators.filter(e => code_touches.indexOf(e.key) >= 0),
+      rxjs.operators.map(e => ({
+        key: e.key,
+        timeStamp: e.timeStamp
+      })),
+      rxjs.operators.distinctUntilKeyChanged('key'),
+    );
+
+    const arrivee$ = distance_subject.asObservable().pipe(
+      rxjs.operators.last(),
+      rxjs.operators.tap(v => console.log('fin', v))
+    );
+
+    arrivee$.subscribe(v => {
+      musique.play();
+    })
+
+    const sur_place$ = rxjs.interval(600).pipe(
+      rxjs.operators.map(v => coureur.draw(2))
+    );
+
+    arret_subject.asObservable().pipe(
+      rxjs.operators.repeatWhen(obs => obs),
+      rxjs.operators.takeUntil(arrivee$),
+      rxjs.operators.startWith(true),
+      rxjs.operators.switchMap(val => (val ? sur_place$ : rxjs.empty())),
+    ).subscribe();
+
+    const runner$ = keyDowns$.pipe(
+      rxjs.operators.tap(() => coureur.draw(1)),
+      rxjs.operators.takeUntil(arrivee$),
+      rxjs.operators.startWith(undefined),
+      rxjs.operators.pairwise(),
+      rxjs.operators.tap(([previousValue, currentValue]) => {
+        if (previousValue) {
+          arret_subject.next(false);
+
+          //calcul de la durée entre 2 clics
+          const duration = currentValue.timeStamp - previousValue.timeStamp;
+
+          //Si la durée est inférieur à 200ms, le personnage avance plus vite
+          const distance_parcourue = (duration < 200) ? (200 - duration) / 10 : 0.5;
+
+          const nouvelle_distance = distance_parcourue + distance;
+
+          if (nouvelle_distance < 300) {
+            distance_subject.next(nouvelle_distance);
+            document.getElementById('screen').style.backgroundPositionX = nouvelle_distance/3 + '%';
+          } else {
+            distance_subject.next(300);
+            document.getElementById('screen').style.backgroundPositionX = '100%';
+
+            distance_subject.complete();
+          }
+        }
+        arret_subject.next(true);
+      })
+    );
+
+    runner$.subscribe();
+  </script>
+</body>
+
+</html>
